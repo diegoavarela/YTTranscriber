@@ -1,0 +1,53 @@
+YTTranscriber
+=============
+
+Pegás una URL de YouTube y te da la transcripción para copiar.
+
+Requisitos: Mac con Apple Silicon (M1 o posterior) y macOS 14 o superior.
+No hace falta instalar nada más: la app ya trae todo lo que usa.
+
+
+Instalación
+-----------
+
+1. Arrastrá YTTranscriber.app a la carpeta Aplicaciones.
+
+2. Abrila con doble clic.
+   La app no está firmada por Apple, así que la primera vez macOS la bloquea
+   con un aviso. Para permitirla (se hace una sola vez):
+
+   a. Cerrá el aviso.
+   b. Abrí Ajustes del Sistema → Privacidad y seguridad.
+   c. Bajá hasta "Se bloqueó el uso de YTTranscriber" y tocá "Abrir de todos modos".
+   d. Confirmá con tu contraseña o Touch ID.
+
+   Alternativa en Terminal (hace lo mismo):
+
+       xattr -dr com.apple.quarantine /Applications/YTTranscriber.app
+
+   Si recibiste el zip por pendrive o carpeta compartida, puede que abra directo
+   sin ningún aviso.
+
+
+Uso
+---
+
+- Si copiaste una URL de YouTube antes de abrir la app, se pega sola.
+- Transcribir (o Enter) arranca el proceso.
+- Copiar (o ⌘⇧C) copia el texto.
+
+Si el video tiene subtítulos, el resultado sale en segundos. Si no tiene, la app
+transcribe el audio en la Mac con Whisper. La primera vez que pasa eso descarga
+el modelo (~1,5 GB, con barra de progreso). Después ya no hace falta descargarlo.
+
+La app necesita internet para hablar con YouTube y se mantiene actualizada sola
+para seguir funcionando cuando YouTube cambia.
+
+
+Desinstalar
+-----------
+
+Borrá /Applications/YTTranscriber.app y estas carpetas:
+
+    ~/Library/Application Support/YTTranscriber
+    ~/Library/Caches/YTTranscriber

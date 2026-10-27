@@ -1,0 +1,20 @@
+YTTranscriber: instalación
+==========================
+
+Requisitos: Mac con chip Apple (M1 o posterior), macOS 14 o superior e internet.
+
+1. Descomprimí este zip (doble clic). Queda una carpeta "YTTranscriber-fuente" en Descargas.
+
+2. Abrí la Terminal (Cmd + Espacio, escribí "Terminal" y Enter) y pegá esta línea:
+
+       bash ~/Downloads/YTTranscriber-fuente/instalar.sh
+
+   y apretá Enter.
+
+3. Si aparece una ventana para instalar las "herramientas de línea de comandos"
+   de Apple, tocá Instalar y después Aceptar. Son gratis y la Terminal espera sola.
+
+4. Esperá unos minutos mientras compila. Al terminar, YTTranscriber se abre sola
+   y queda instalada en Aplicaciones, como cualquier otra app.
+
+Si algo falla, copiá lo que dice la Terminal y mandáselo a quien te pasó la app.
