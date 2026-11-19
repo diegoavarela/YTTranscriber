@@ -4,7 +4,8 @@ App nativa de macOS (Apple Silicon, macOS 14+) para obtener la transcripción de
 
 1. Valida la URL (watch, youtu.be, shorts, embed, live, music).
 2. Busca subtítulos en el idioma original del video con yt-dlp: primero manuales, después automáticos. Los convierte a texto limpio, sin marcas de tiempo ni líneas repetidas.
-3. Si no hay subtítulos, baja solo el audio y lo transcribe localmente con [WhisperKit](https://github.com/argmaxinc/WhisperKit) (modelo `large-v3-v20240930_turbo`), detectando el idioma.
+   Cuando YouTube agrega doblajes automáticos con IA, el video trae una pista de audio y subtítulos "-orig" por cada idioma doblado, y el campo `language` de yt-dlp puede venir vacío o con el idioma de un doblaje. Por eso el idioma original sale de la pista de audio que yt-dlp marca como original. Si no se puede saber, no usa subtítulos y pasa a Whisper.
+3. Si no hay subtítulos, baja solo el audio (la pista original, no un doblaje) y lo transcribe localmente con [WhisperKit](https://github.com/argmaxinc/WhisperKit) (modelo `large-v3-v20240930_turbo`), detectando el idioma.
 
 Las transcripciones se guardan en caché por ID de video en `~/Library/Caches/YTTranscriber/transcripts/`.
 
@@ -88,8 +89,14 @@ DEVELOPER_DIR=/Library/Developer/CommandLineTools swift test \
 
 - Al abrir la app, si hay una URL de YouTube en el portapapeles se pega sola. macOS puede pedir permiso para leer el portapapeles.
 - **Transcribir** (o Enter) arranca el proceso. El estado pasa por *Buscando subtítulos* → *Descargando audio* → *Transcribiendo* (con progreso) → *Listo*.
+- **Transcribir siempre con Whisper (ignorar subtítulos de YouTube)**: con esta casilla marcada (viene desmarcada y se recuerda), no se usan subtítulos y siempre se transcribe el audio. Tarda más, pero no depende de cómo YouTube marque los idiomas.
 - **Copiar** o **⌘⇧C** copia el texto completo. El texto también se puede seleccionar a mano.
 - La primera vez que hace falta Whisper se descarga el modelo (~1,6 GB) en `~/Library/Application Support/YTTranscriber/whisper/`, con barra de progreso. Las siguientes veces solo se carga.
+
+## Cambios
+
+- **1.0.1**: corrige videos con doblajes automáticos de YouTube que salían con subtítulos en otro idioma (por ejemplo, árabe en un video en inglés). El idioma original se toma de la pista de audio original, el audio para Whisper también es esa pista, y se agrega la opción "Transcribir siempre con Whisper". Las transcripciones de subtítulos guardadas en caché por versiones anteriores se vuelven a generar; las de Whisper se conservan.
+- **1.0.0**: primera versión.
 
 ## Estructura
 

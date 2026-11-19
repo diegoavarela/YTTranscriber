@@ -17,9 +17,12 @@ public struct TranscriptCache: Sendable {
         directory.appendingPathComponent("\(videoID).json")
     }
 
+    /// Ignora las transcripciones de subtítulos elegidos con una regla vieja: se vuelven a generar.
     public func load(videoID: String) -> Transcript? {
-        guard let data = try? Data(contentsOf: fileURL(for: videoID)) else { return nil }
-        return try? JSONDecoder.cache.decode(Transcript.self, from: data)
+        guard let data = try? Data(contentsOf: fileURL(for: videoID)),
+              let transcript = try? JSONDecoder.cache.decode(Transcript.self, from: data),
+              transcript.isUpToDate else { return nil }
+        return transcript
     }
 
     public func save(_ transcript: Transcript) throws {

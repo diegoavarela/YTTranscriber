@@ -8,15 +8,54 @@ public struct VideoInfo: Decodable, Sendable {
     public let liveStatus: String?
     public let subtitles: [String: [SubtitleTrack]]?
     public let automaticCaptions: [String: [SubtitleTrack]]?
+    public let formats: [Format]?
 
     public struct SubtitleTrack: Decodable, Sendable {
         public let ext: String?
     }
 
+    /// Lo justo de cada formato para reconocer la pista de audio original entre los doblajes.
+    /// Cada campo se lee por separado: un valor raro en un formato no invalida toda la metadata.
+    public struct Format: Decodable, Sendable {
+        public let acodec: String?
+        public let language: String?
+        public let languagePreference: Int?
+        public let formatNote: String?
+
+        enum CodingKeys: String, CodingKey {
+            case acodec, language
+            case languagePreference = "language_preference"
+            case formatNote = "format_note"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            acodec = try? container.decodeIfPresent(String.self, forKey: .acodec)
+            language = try? container.decodeIfPresent(String.self, forKey: .language)
+            languagePreference = try? container.decodeIfPresent(Int.self, forKey: .languagePreference)
+            formatNote = try? container.decodeIfPresent(String.self, forKey: .formatNote)
+        }
+
+        var hasAudio: Bool { acodec != nil && acodec != "none" }
+
+        /// yt-dlp marca la pista original de YouTube con `language_preference` 10 y "original" en la nota.
+        var isOriginalAudio: Bool {
+            guard hasAudio else { return false }
+            return (languagePreference ?? Int.min) >= 10 || (formatNote?.localizedCaseInsensitiveContains("original") ?? false)
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, title, language, subtitles
+        case id, title, language, subtitles, formats
         case liveStatus = "live_status"
         case automaticCaptions = "automatic_captions"
+    }
+
+    /// Idioma de la pista de audio marcada como original, si hay una sola candidata.
+    /// Con doblajes automáticos, `language` puede venir vacío o con el idioma de un doblaje.
+    public var originalAudioLanguage: String? {
+        let languages = Set((formats ?? []).filter(\.isOriginalAudio).compactMap(\.language).filter { !$0.isEmpty })
+        return languages.count == 1 ? languages.first : nil
     }
 }
 
@@ -119,8 +158,19 @@ public struct YTDLP: Sendable {
     /// Formatos que `afconvert` (incluido en macOS) puede leer: audio AAC en m4a, o el mp4 combinado.
     static let audioFormatSelector = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/best[ext=mp4]"
 
+    /// Con doblajes, primero la pista en el idioma original: el mp4 combinado puede traer un doblaje.
+    static func audioFormatSelector(originalLanguage: String?) -> String {
+        guard let language = originalLanguage,
+              language.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else {
+            return audioFormatSelector
+        }
+        let original = audioFormatSelector.split(separator: "/").map { "\($0)[language=\(language)]" }
+        return (original + [audioFormatSelector]).joined(separator: "/")
+    }
+
     /// Baja solo el audio y lo convierte a WAV mono 16 kHz (el formato que usa Whisper), sin ffmpeg.
     public func downloadAudio(
+        info: VideoInfo,
         infoFile: URL,
         workDir: URL,
         onProgress: @escaping @Sendable (Double) -> Void
@@ -128,7 +178,7 @@ public struct YTDLP: Sendable {
         let result = try await run(
             commonArguments + [
                 "--load-info-json", infoFile.path,
-                "-f", Self.audioFormatSelector,
+                "-f", Self.audioFormatSelector(originalLanguage: info.originalAudioLanguage),
                 "--newline",
                 "--progress-template", "download:YTPROGRESS %(progress.downloaded_bytes)s %(progress.total_bytes,total_bytes_estimate)s",
                 "-o", workDir.appendingPathComponent("audio-source.%(ext)s").path
@@ -165,7 +215,9 @@ public struct YTDLP: Sendable {
     }
 
     /// Elige subtítulos en el idioma original: primero manuales, después automáticos.
-    public static func chooseSubtitle(for info: VideoInfo) -> SubtitleChoice? {
+    /// Con `alwaysUseWhisper` no elige ninguno, así se transcribe el audio.
+    public static func chooseSubtitle(for info: VideoInfo, alwaysUseWhisper: Bool = false) -> SubtitleChoice? {
+        guard !alwaysUseWhisper else { return nil }
         let manual = (info.subtitles ?? [:]).filter { key, tracks in
             key != "live_chat" && tracks.contains { $0.ext == "vtt" }
         }.keys.sorted()
@@ -173,8 +225,7 @@ public struct YTDLP: Sendable {
             tracks.contains { $0.ext == "vtt" }
         }.keys.sorted()
 
-        let originalFromAuto = auto.first { $0.hasSuffix("-orig") }.map { String($0.dropLast(5)) }
-        guard let original = info.language ?? originalFromAuto else {
+        guard let original = originalLanguage(for: info, autoKeys: auto) else {
             // Sin idioma conocido: un único subtítulo manual es casi seguro el original.
             return manual.count == 1 ? SubtitleChoice(languageKey: manual[0], isAutomatic: false) : nil
         }
@@ -189,6 +240,15 @@ public struct YTDLP: Sendable {
             return SubtitleChoice(languageKey: key, isAutomatic: true)
         }
         return nil
+    }
+
+    /// Idioma original del video. Si YouTube agregó doblajes automáticos (varias claves "-orig"),
+    /// `language` y el orden de las claves no sirven: solo vale la pista de audio marcada como original.
+    static func originalLanguage(for info: VideoInfo, autoKeys: [String]) -> String? {
+        if let audio = info.originalAudioLanguage { return audio }
+        let origKeys = autoKeys.filter { $0.hasSuffix("-orig") }
+        guard origKeys.count <= 1 else { return nil }
+        return info.language ?? origKeys.first.map { String($0.dropLast(5)) }
     }
 
     /// Coincidencia exacta o por idioma base ("en" ↔ "en-US").
