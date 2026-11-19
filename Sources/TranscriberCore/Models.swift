@@ -21,14 +21,28 @@ public struct Transcript: Codable, Equatable, Sendable {
     public let language: String?
     public let text: String
     public let createdAt: Date
+    /// Versión de la regla que eligió los subtítulos. Las transcripciones guardadas antes de la 1.0.1
+    /// no la tienen y pueden venir de un doblaje automático (por ejemplo, subtítulos en árabe).
+    public let subtitleChoiceVersion: Int?
 
-    public init(videoID: String, title: String, source: TranscriptSource, language: String?, text: String, createdAt: Date = Date()) {
+    public static let currentSubtitleChoiceVersion = 2
+
+    public init(
+        videoID: String, title: String, source: TranscriptSource, language: String?, text: String,
+        createdAt: Date = Date(), subtitleChoiceVersion: Int? = Transcript.currentSubtitleChoiceVersion
+    ) {
         self.videoID = videoID
         self.title = title
         self.source = source
         self.language = language
         self.text = text
         self.createdAt = createdAt
+        self.subtitleChoiceVersion = subtitleChoiceVersion
+    }
+
+    /// Las de Whisper siempre valen; las de subtítulos, solo si se eligieron con la regla actual.
+    public var isUpToDate: Bool {
+        source == .whisper || (subtitleChoiceVersion ?? 1) >= Transcript.currentSubtitleChoiceVersion
     }
 }
 

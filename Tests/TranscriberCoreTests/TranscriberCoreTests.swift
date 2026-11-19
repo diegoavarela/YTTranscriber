@@ -143,6 +143,153 @@ import Testing
     }
 }
 
+/// Videos con doblajes automáticos de YouTube: muchas claves "-orig" y una pista de audio por idioma.
+/// Claves reales de https://www.youtube.com/watch?v=eoSvKRz5mIc (en inglés, 19 doblajes con IA).
+@Suite struct DubbedVideoSubtitleTests {
+    static let origKeys = [
+        "ar-orig", "bn-orig", "nl-NL-orig", "en-orig", "fr-FR-orig", "de-DE-orig", "iw-orig", "hi-orig", "id-orig",
+        "it-orig", "ja-orig", "ko-orig", "ml-orig", "pl-orig", "pt-BR-orig", "es-US-orig", "ta-orig", "te-orig", "uk-orig"
+    ]
+    static let translatedKeys = ["ar", "de", "en", "es", "fr", "it", "ja", "pt"]
+    static let manualKeys = ["en-ehkg1hFWq8A"]
+    static let dubbedAudio = ["ar", "bn", "de-DE", "es-US", "fr-FR", "hi", "id", "it", "iw", "ja", "ko", "ml", "nl-NL",
+                              "pl", "pt-BR", "ta", "te", "uk"]
+
+    /// Formatos de audio como los arma yt-dlp: el original con `language_preference` 10 y "original" en la nota,
+    /// los doblajes con -1, y el mp4 combinado (formato 18) con el idioma de un doblaje.
+    static func formats(original: String?) -> String {
+        var formats = dubbedAudio.enumerated().map { index, language in
+            #"{"format_id": "140-\#(index)", "ext": "m4a", "acodec": "mp4a.40.2", "vcodec": "none", "language": "\#(language)", "language_preference": -1, "format_note": "\#(language), medium"}"#
+        }
+        if let original {
+            formats.append(#"{"format_id": "140-18", "ext": "m4a", "acodec": "mp4a.40.2", "vcodec": "none", "language": "\#(original)", "language_preference": 10, "format_note": "English (US) original (default), medium"}"#)
+        }
+        formats.append(#"{"format_id": "18", "ext": "mp4", "acodec": "mp4a.40.2", "vcodec": "avc1.42001E", "language": "ar", "language_preference": -1, "format_note": "360p"}"#)
+        formats.append(#"{"format_id": "sb0", "ext": "mhtml", "acodec": "none", "vcodec": "none", "format_note": "storyboard"}"#)
+        return "[" + formats.joined(separator: ",") + "]"
+    }
+
+    static func info(
+        language: String?, manual: [String] = manualKeys, auto: [String] = origKeys + translatedKeys, formats: String? = nil
+    ) throws -> VideoInfo {
+        func tracks(_ keys: [String]) -> String {
+            keys.map { "\"\($0)\": [{\"ext\": \"json3\"}, {\"ext\": \"vtt\"}]" }.joined(separator: ",")
+        }
+        let languageJSON = language.map { "\"\($0)\"" } ?? "null"
+        let formatsJSON = formats.map { ", \"formats\": \($0)" } ?? ""
+        let json = """
+        {"id": "eoSvKRz5mIc", "title": "Soldier and citizen, Houdon's Washington", "language": \(languageJSON),
+         "subtitles": {\(tracks(manual))}, "automatic_captions": {\(tracks(auto))}\(formatsJSON)}
+        """
+        return try JSONDecoder().decode(VideoInfo.self, from: Data(json.utf8))
+    }
+
+    @Test func languageNilUsesOriginalAudioTrackNotAlphabeticalOrig() throws {
+        let info = try Self.info(language: nil, formats: Self.formats(original: "en-US"))
+        #expect(info.originalAudioLanguage == "en-US")
+        #expect(YTDLP.chooseSubtitle(for: info) == SubtitleChoice(languageKey: "en-ehkg1hFWq8A", isAutomatic: false))
+    }
+
+    @Test func languageNilWithoutManualPicksEnglishOrig() throws {
+        let info = try Self.info(language: nil, manual: [], formats: Self.formats(original: "en-US"))
+        let choice = YTDLP.chooseSubtitle(for: info)
+        #expect(choice == SubtitleChoice(languageKey: "en-orig", isAutomatic: true))
+        #expect(choice?.language == "en")
+    }
+
+    @Test func languageNilAndNoOriginalMarkerGoesToWhisper() throws {
+        // Sin pista original marcada no hay forma de saber cuál de las 19 "-orig" es la verdadera.
+        let withoutFormats = try Self.info(language: nil, manual: [])
+        #expect(YTDLP.chooseSubtitle(for: withoutFormats) == nil)
+        let onlyDubs = try Self.info(language: nil, manual: [], formats: Self.formats(original: nil))
+        #expect(onlyDubs.originalAudioLanguage == nil)
+        #expect(YTDLP.chooseSubtitle(for: onlyDubs) == nil)
+    }
+
+    @Test func neverPicksArabicForThisVideo() throws {
+        for language in [nil, "ar", "en-US"] {
+            for formats in [nil, Self.formats(original: nil), Self.formats(original: "en-US")] {
+                for manual in [Self.manualKeys, []] {
+                    // Sin formatos y con language "ar", yt-dlp no da ninguna otra señal: ese caso no se puede distinguir.
+                    if language == "ar" && formats == nil { continue }
+                    let choice = YTDLP.chooseSubtitle(for: try Self.info(language: language, manual: manual, formats: formats))
+                    #expect(choice.map { YTDLP.baseLanguage($0.language) } != "ar",
+                            "language=\(language ?? "nil") formats=\(formats != nil) manual=\(manual) -> \(String(describing: choice))")
+                }
+            }
+        }
+    }
+
+    @Test func languageEnUSPicksManualEnglish() throws {
+        let info = try Self.info(language: "en-US", formats: Self.formats(original: "en-US"))
+        #expect(YTDLP.chooseSubtitle(for: info) == SubtitleChoice(languageKey: "en-ehkg1hFWq8A", isAutomatic: false))
+    }
+
+    @Test func wrongLanguageFieldLosesToOriginalAudioTrack() throws {
+        // Visto en una corrida real: yt-dlp devolvió language "ar" (el idioma del formato 18, doblado).
+        let info = try Self.info(language: "ar", manual: [], formats: Self.formats(original: "en-US"))
+        #expect(YTDLP.chooseSubtitle(for: info) == SubtitleChoice(languageKey: "en-orig", isAutomatic: true))
+    }
+
+    @Test func languageWithManyOrigKeysButNoOriginalMarkerGoesToWhisper() throws {
+        let info = try Self.info(language: "en-US", manual: [], formats: Self.formats(original: nil))
+        #expect(YTDLP.chooseSubtitle(for: info) == nil)
+    }
+
+    @Test func singleOrigKeyKeepsWorkingWithoutLanguage() throws {
+        let info = try Self.info(language: nil, manual: [], auto: ["en", "fr-orig", "fr"])
+        #expect(YTDLP.chooseSubtitle(for: info) == SubtitleChoice(languageKey: "fr-orig", isAutomatic: true))
+    }
+
+    @Test func alwaysUseWhisperIgnoresSubtitles() throws {
+        let info = try Self.info(language: "en-US", formats: Self.formats(original: "en-US"))
+        #expect(YTDLP.chooseSubtitle(for: info, alwaysUseWhisper: true) == nil)
+        #expect(YTDLP.chooseSubtitle(for: info, alwaysUseWhisper: false) != nil)
+        let single = try Self.info(language: "fr", manual: ["fr"], auto: ["fr-orig"])
+        #expect(YTDLP.chooseSubtitle(for: single, alwaysUseWhisper: true) == nil)
+    }
+
+    @Test func audioSelectorPrefersOriginalLanguage() {
+        #expect(YTDLP.audioFormatSelector(originalLanguage: "en-US")
+            == "bestaudio[ext=m4a][language=en-US]/bestaudio[acodec^=mp4a][language=en-US]/best[ext=mp4][language=en-US]/"
+            + YTDLP.audioFormatSelector)
+        #expect(YTDLP.audioFormatSelector(originalLanguage: nil) == YTDLP.audioFormatSelector)
+        #expect(YTDLP.audioFormatSelector(originalLanguage: "en]/best") == YTDLP.audioFormatSelector)
+    }
+
+    @Test func oddFormatFieldsDoNotBreakMetadata() throws {
+        let formats = #"[{"acodec": "mp4a.40.2", "language": null, "language_preference": "x", "format_note": 3}, {"acodec": "opus", "language": "en", "language_preference": 10}]"#
+        let info = try Self.info(language: nil, manual: [], formats: formats)
+        #expect(info.originalAudioLanguage == "en")
+    }
+}
+
+@Suite struct TranscriptCacheStalenessTests {
+    @Test func ignoresSubtitleTranscriptsFromBeforeTheFix() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let cache = TranscriptCache(directory: directory)
+        func legacy(_ id: String, source: String) throws {
+            let json = #"{"videoID": "\#(id)", "title": "T", "source": "\#(source)", "language": "ar", "text": "x", "createdAt": "2026-11-01T00:00:00Z"}"#
+            try Data(json.utf8).write(to: directory.appendingPathComponent("\(id).json"))
+        }
+        try legacy("aaaaaaaaaaa", source: "autoSubtitles")
+        try legacy("bbbbbbbbbbb", source: "manualSubtitles")
+        try legacy("ccccccccccc", source: "whisper")
+        #expect(cache.load(videoID: "aaaaaaaaaaa") == nil)
+        #expect(cache.load(videoID: "bbbbbbbbbbb") == nil)
+        #expect(cache.load(videoID: "ccccccccccc")?.text == "x")
+
+        let fresh = Transcript(
+            videoID: "ddddddddddd", title: "T", source: .autoSubtitles, language: "en", text: "hi",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try cache.save(fresh)
+        #expect(cache.load(videoID: "ddddddddddd") == fresh)
+    }
+}
+
 @Suite struct YTDLPErrorTests {
     @Test(arguments: [
         ("ERROR: [youtube] abc: Private video. Sign in if you've been granted access", TranscriberError.privateVideo),

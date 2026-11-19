@@ -35,6 +35,9 @@ final class TranscriberViewModel {
     private let whisper = WhisperService()
     private var copyResetTask: Task<Void, Never>?
     private static let lastUpdateCheckKey = "lastYtdlpUpdateCheck"
+    static let alwaysUseWhisperKey = "alwaysUseWhisper"
+
+    private var alwaysUseWhisper: Bool { UserDefaults.standard.bool(forKey: Self.alwaysUseWhisperKey) }
 
     /// Si el portapapeles tiene una URL de YouTube y el campo está vacío, la pega.
     /// Desde macOS 15.4 leer el portapapeles puede mostrar un aviso de privacidad: se detecta primero
@@ -96,7 +99,7 @@ final class TranscriberViewModel {
             phase = .failed(TranscriberError.invalidURL.localizedDescription)
             return
         }
-        if let cached = cache.load(videoID: url.videoID) {
+        if let cached = cache.load(videoID: url.videoID), !alwaysUseWhisper || cached.source == .whisper {
             show(cached, fromCache: true)
             return
         }
@@ -158,7 +161,7 @@ final class TranscriberViewModel {
             throw TranscriberError.liveStream
         }
 
-        if let choice = YTDLP.chooseSubtitle(for: info),
+        if let choice = YTDLP.chooseSubtitle(for: info, alwaysUseWhisper: alwaysUseWhisper),
            let vtt = try await ytdlp.downloadSubtitle(choice, infoFile: infoFile, workDir: workDir) {
             let text = SubtitleParser.plainText(fromVTT: vtt)
             if !text.isEmpty {
@@ -173,7 +176,7 @@ final class TranscriberViewModel {
         }
 
         phase = .downloadingAudio(nil)
-        let audio = try await ytdlp.downloadAudio(infoFile: infoFile, workDir: workDir) { fraction in
+        let audio = try await ytdlp.downloadAudio(info: info, infoFile: infoFile, workDir: workDir) { fraction in
             Task { @MainActor in
                 if case .downloadingAudio = self.phase { self.phase = .downloadingAudio(fraction) }
             }

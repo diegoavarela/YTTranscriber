@@ -4,6 +4,7 @@ import TranscriberCore
 struct ContentView: View {
     @State private var model = TranscriberViewModel()
     @FocusState private var urlFieldFocused: Bool
+    @AppStorage(TranscriberViewModel.alwaysUseWhisperKey) private var alwaysUseWhisper = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -16,6 +17,11 @@ struct ContentView: View {
                     .keyboardShortcut(.defaultAction)
                     .disabled(model.phase.isBusy || model.urlText.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+
+            Toggle("Transcribir siempre con Whisper (ignorar subtítulos de YouTube)", isOn: $alwaysUseWhisper)
+                .toggleStyle(.checkbox)
+                .font(.callout)
+                .disabled(model.phase.isBusy)
 
             StatusView(phase: model.phase)
 
